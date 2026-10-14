@@ -1,0 +1,124 @@
+name: Сборка APK
+
+on:
+  # Автоматически: при создании тега вида v1.0.0 (в том числе через «Releases → Draft a new release»)
+  push:
+    tags:
+      - 'v*'
+  # Вручную: вкладка Actions → «Сборка APK» → Run workflow
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия приложения (например 1.0.0)'
+        required: true
+        default: '1.0.0'
+      publish:
+        description: 'Опубликовать релиз на GitHub (чтобы скачать APK с телефона)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx3g
+    steps:
+      - name: Получить код
+        uses: actions/checkout@v4
+
+      - name: Определить версию
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="${{ github.event.inputs.version }}"
+          fi
+          V="${V#v}"
+          echo "name=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=v$V" >> "$GITHUB_OUTPUT"
+          echo "Версия: $V"
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Установить зависимости
+        run: npm install --no-audit --no-fund
+
+      - name: Проверить расчёты (автотесты)
+        run: npm test
+
+      - name: Создать Android-проект
+        run: npx cap add android
+
+      - name: Донастроить Android (уведомления, версия)
+        env:
+          VERSION_NAME: ${{ steps.ver.outputs.name }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: python3 ci/patch_android.py
+
+      - name: Сгенерировать иконки и заставку
+        continue-on-error: true
+        run: npx capacitor-assets generate --android
+
+      - name: Синхронизировать веб-часть
+        run: npx cap sync android
+
+      - name: Ключ подписи (один и тот же для всех версий)
+        run: |
+          mkdir -p ~/.android
+          cp ci/debug.keystore ~/.android/debug.keystore
+
+      - name: Собрать APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Подготовить файл
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk "Legche-${{ steps.ver.outputs.name }}.apk"
+          ls -la Legche-*.apk
+
+      - name: Сохранить APK как артефакт сборки
+        uses: actions/upload-artifact@v4
+        with:
+          name: Legche-${{ steps.ver.outputs.name }}-apk
+          path: Legche-${{ steps.ver.outputs.name }}.apk
+          retention-days: 30
+
+      - name: Опубликовать релиз
+        if: github.event_name == 'push' || github.event.inputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Легче ${{ steps.ver.outputs.name }}
+          files: Legche-${{ steps.ver.outputs.name }}.apk
+          generate_release_notes: true
+          body: |
+            ## Установка
+            1. Скачайте файл **Legche-${{ steps.ver.outputs.name }}.apk** ниже (раздел Assets).
+            2. Откройте его на телефоне и разрешите установку из этого источника.
+            3. Если Google Play Protect предупредит о неизвестном приложении, нажмите «Всё равно установить».
+
+            Обновление ставится поверх старой версии, данные сохраняются. Перед обновлением всё равно сделайте копию: Настройки → Сохранить копию.

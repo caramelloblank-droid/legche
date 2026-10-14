@@ -1,0 +1,25 @@
+const vm=require('vm'),fs=require('fs');
+const ctx={module:{},console};vm.createContext(ctx);
+['util','calc'].forEach(f=>vm.runInContext(fs.readFileSync('www/js/'+f+'.js','utf8'),ctx));
+vm.runInContext(`
+const assert=(c,m)=>{if(!c)throw new Error('FAIL '+m)};
+const m={sex:'m',age:35,height:183,activity:1.2,deficitPct:20};
+const f={sex:'f',age:30,height:172,activity:1.2,deficitPct:20};
+const pm=Calc.plan(m,150), pf=Calc.plan(f,120);
+console.log('M',JSON.stringify(pm));console.log('F',JSON.stringify(pf));
+assert(pm.target>=1500&&pf.target>=1200,'floor');
+assert(pm.deficit<=1000,'cap');
+const small=Calc.plan({sex:'f',age:50,height:155,activity:1.2,deficitPct:25},52);
+console.log('small',JSON.stringify(small)); assert(small.target>=Math.min(1200,small.tdee),'small floor'); assert(small.target<=small.tdee,'not above tdee');
+const soft=Calc.plan(m,150,{softDeficit:true}); assert(soft.deficit<=pm.deficit,'soft');
+assert(Calc.waterGoal(150)===3000 && Calc.waterGoal(50)===1500,'water');
+assert(Calc.bpLevel(120,80)===0&&Calc.bpLevel(135,80)===1&&Calc.bpLevel(145,85)===2&&Calc.bpLevel(185,100)===3,'bp');
+const now=Date.now();
+assert(Calc.bpMode([{ts:now-3600e3,sys:190,dia:110}],now).mode==='stop','stop');
+assert(Calc.bpMode([{ts:now-7200e3,sys:145,dia:92},{ts:now-3600e3,sys:150,dia:95}],now).mode==='light','light');
+assert(Calc.bpMode([{ts:now-7200e3,sys:125,dia:80},{ts:now-3600e3,sys:150,dia:95}],now).mode==='ok','single high ok');
+assert(Calc.gluLevel(4.5,'fasting')===0&&Calc.gluLevel(6.1,'fasting')===1&&Calc.gluLevel(7.2,'fasting')===2&&Calc.gluLevel(3.5,'fasting')===2&&Calc.gluLevel(9,'after')===1,'glu');
+const ws=[];for(let i=0;i<30;i++)ws.push({d:addDays('2026-09-01',i),w:150-i*0.1+(i%3-1)*0.4});
+const ma=Calc.movAvg(ws);const s=Calc.slope(ma);console.log('slope',s);assert(s<0&&s>-0.2,'slope');
+console.log('OK calc');
+`,ctx);

@@ -1,0 +1,24 @@
+{
+  "schema": 2,
+  "minApp": "2.0.0",
+  "packs": {
+    "foods": {
+      "version": 1,
+      "file": "foods.json",
+      "count": 835,
+      "sha256": "8b9261120b796d729a958ef7d9f8fe209641a48c172841fee414537eab7f488a"
+    },
+    "recipes": {
+      "version": 1,
+      "file": "recipes.json",
+      "count": 130,
+      "sha256": "c1da670a4d794840aa68da1f73eaa999cdb5a81419d82fe73acb3b398bbbbad1"
+    },
+    "tips": {
+      "version": 1,
+      "file": "tips.json",
+      "count": 17,
+      "sha256": "b86b7aa7adcc319944ee234c388fbcc478e0a64e368629fcfaf8e516383e3a3e"
+    }
+  }
+}

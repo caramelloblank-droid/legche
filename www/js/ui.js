@@ -50,10 +50,13 @@ const Sheets = {
   setTitle(t) { const r = Sheets.stack[Sheets.stack.length - 1]; if (r) $('h2', r.el).textContent = t; }
 };
 let toastT = null;
-function toast(msg, ms) {
+function toast(msg, ms, action) {
   const old = $('.toast'); if (old) old.remove();
-  const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; $('#app').appendChild(t);
-  clearTimeout(toastT); toastT = setTimeout(() => t.remove(), ms || 2400);
+  const t = document.createElement('div'); t.className = 'toast';
+  t.appendChild(document.createTextNode(msg));
+  if (action) { const b = document.createElement('button'); b.textContent = action.label; b.className = 'toastbtn'; b.onclick = () => { t.remove(); action.fn(); }; t.appendChild(b); }
+  $('#app').appendChild(t);
+  clearTimeout(toastT); toastT = setTimeout(() => t.remove(), ms || (action ? 6000 : 2400));
 }
 function celebrate(emoji, title, text, btn) {
   const c = document.createElement('div'); c.className = 'celebrate';
@@ -90,12 +93,14 @@ function lineChart(o) {
 /* Расчётные хелперы поверх профиля */
 const dowIdx = k => (parseD(k).getDay() + 6) % 7;
 function calcPlanFor(P, D) { return Calc.plan(P, P.calcWeight || P.startWeight, { softDeficit: Calc.gluSoft(D.glu, dkey()) }); }
-function targetFor(P, D, k) {
+/** Норма на дату с учётом «дня с запасом» и особых периодов. Возвращает {target, hide, mode, period} */
+function dayInfo(P, D, k) {
   const pl = calcPlanFor(P, D), r = Store.db.prefs.reserveDow;
-  if (r == null || r < 0) return pl.target;
-  const f = dowIdx(k) === r ? 1.15 : (7 - 1.15) / 6;
-  return Math.round(pl.target * f / 10) * 10;
+  let base = pl.target;
+  if (r != null && r >= 0) base = Math.round(pl.target * (dowIdx(k) === r ? 1.15 : (7 - 1.15) / 6) / 10) * 10;
+  return typeof Periods !== 'undefined' ? Periods.adjust(D, k, base, pl, Calc.gluSoft(D.glu, dkey())) : { target: base };
 }
+const targetFor = (P, D, k) => dayInfo(P, D, k).target;
 function curWeight(P, D) { return D.weight.length ? D.weight[D.weight.length - 1].w : P.startWeight; }
 function sum(arr, f) { return arr.reduce((a, x) => a + f(x), 0); }
 const SLOTNAME = { b: 'Завтрак', l: 'Обед', d: 'Ужин', s: 'Перекус' };

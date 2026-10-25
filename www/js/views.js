@@ -1,6 +1,6 @@
 /* Экраны и действия. Часть 1: общее состояние, «Сегодня», дневник, выбор продуктов. */
-const S = { tab: 'today', date: dkey(), sub: { plan: 'day', prog: 'weight', move: 'main' }, planDate: dkey(), shopWho: 'me', shopScope: 'week' };
-const ACT = {}, VIEWS = {};
+const S = { tab: 'today', date: dkey(), sub: { plan: 'shop', prog: 'weight', move: 'main' }, planDate: dkey(), shopWho: 'me', shopScope: 'week' };
+const ACT = {}, VIEWS = {}, CHG = {};
 const act = (name, fn) => { ACT[name] = fn; };
 let G_ = null; // последний расчёт Game для текущего рендера
 
@@ -30,7 +30,7 @@ function alertsHtml(P, D, g) {
 
 /* ---------- Сегодня ---------- */
 VIEWS.today = function (P, D, g) {
-  const k = dkey(), st = g.stat(k), pl = calcPlanFor(P, D), target = targetFor(P, D, k);
+  const k = dkey(), st = g.stat(k), pl = calcPlanFor(P, D), di = dayInfo(P, D, k), target = di.target;
   const left = target - st.kcal, pct = target ? st.kcal / target : 0, f = target / pl.target;
   const R = 74, C = 2 * Math.PI * R;
   const col = left < 0 ? 'var(--gold)' : 'var(--pri)';
@@ -40,12 +40,14 @@ VIEWS.today = function (P, D, g) {
   const drops = '<div class="drops">' + Array.from({ length: 10 }, (_, i) => '<i class="' + (i < wl ? 'f' : '') + '"></i>').join('') + '</div>';
   const habit = (ok, title, sub) => '<div class="habit"><div class="tick ' + (ok ? 'on' : '') + '">' + ic('check') + '</div><div class="grow"><b>' + title + '</b><div class="small muted">' + sub + '</div></div></div>';
   const need = r0(Calc.FLOOR[P.sex] * 0.75);
-  let h = alertsHtml(P, D, g);
+  let h = topBanners(P, D, g, di) + alertsHtml(P, D, g);
+  const ringStart = h.length;
   h += '<div class="card"><div class="hero"><div class="ringwrap">' + ring + '<div class="ringtxt"><div class="big num">' + fmtN(Math.abs(left)) + '</div><div class="lbl">' + (left >= 0 ? 'ккал осталось' : 'ккал сверх нормы') + '</div></div></div>' +
     '<div><div class="small muted">Съедено</div><div class="b num" style="font-size:22px">' + fmtN(st.kcal) + ' <span class="muted small" style="font-weight:400">из ' + fmtN(target) + '</span></div>' +
     mac('Белки', st.p, pl.protein * f, '') + mac('Жиры', st.f, pl.fat * f, 'gold') + mac('Углеводы', st.c, pl.carbs * f, 'ok') + '</div></div>' +
     (f > 1.01 ? '<div class="small muted mt">Сегодня день с запасом: норма выше на 15%. Недельное среднее не меняется.</div>' : '') +
     '<div class="row mt"><button class="btn grow" data-a="food-add" data-slot="' + autoSlot() + '">' + ic('plus', 'sm') + ' Добавить еду</button><button class="btn alt" data-a="open-diary">Дневник</button></div></div>';
+  if (di.hide) h = h.slice(0, ringStart) + feastCard(P, D, di, st);
 
   h += '<div class="card"><h3>' + ic('drop') + ' Вода<span class="sp"></span><span class="small muted num">' + fmtN(st.water) + ' / ' + fmtN(st.goal) + ' мл</span></h3>' + drops +
     '<div class="water"><button class="btn alt" data-a="water" data-ml="200">+200</button><button class="btn alt" data-a="water" data-ml="250">+250</button><button class="btn alt" data-a="water" data-ml="500">+500</button></div>' +
@@ -64,7 +66,8 @@ VIEWS.today = function (P, D, g) {
 
   h += '<div class="card"><h3>🎲 Челленджи недели</h3>' + g.challenges.map(c => '<div class="mb"><div class="row sb small"><span>' + (c.done ? '✅ ' : '') + esc(c.t) + '</span><span class="muted num">' + c.cur + '/' + c.goal + '</span></div><div class="bar ' + (c.done ? 'ok' : '') + ' mt"><i style="width:' + c.cur / c.goal * 100 + '%"></i></div></div>').join('') + '<div class="tiny muted">За каждый выполненный челлендж +50 очков.</div></div>';
 
-  h += '<div class="card"><h3>Быстрые записи</h3><div class="two"><button class="btn alt" data-a="weight-add">Вес</button><button class="btn alt" data-a="meas-add">Замеры тела</button><button class="btn alt" data-a="bp-add">Давление</button><button class="btn alt" data-a="glu-add">Сахар</button></div></div>';
+  h += '<div class="card"><h3>Быстрые записи</h3><div class="two"><button class="btn alt" data-a="weight-add">Вес</button><button class="btn alt" data-a="meas-add">Замеры тела</button><button class="btn alt" data-a="bp-add">Давление</button><button class="btn alt" data-a="glu-add">Сахар</button><button class="btn alt" data-a="period-new">Событие / поездка</button><button class="btn alt" data-a="weekly-open">Итоги недели</button></div></div>';
+  h += finisherCard(P, D, g, di, st);
   h += '<div class="card flat"><div class="small muted">Совет дня</div><div class="mt">' + esc(TIPS[(hashStr(k) % TIPS.length)]) + '</div></div>';
   return h;
 };
@@ -84,7 +87,7 @@ act('water-custom-ok', () => { const v = nval('wml'); if (!(v > 0 && v <= 3000))
 
 /* ---------- Дневник ---------- */
 VIEWS.diary = function (P, D, g) {
-  const k = S.date, st = g.stat(k), pl = calcPlanFor(P, D), target = targetFor(P, D, k);
+  const k = S.date, st = g.stat(k), pl = calcPlanFor(P, D), di = dayInfo(P, D, k), target = di.target;
   const left = target - st.kcal;
   let h = '<div class="datebar"><button class="iconbtn" data-a="date-prev" aria-label="Назад">' + ic('chevl') + '</button><div class="center"><b>' + (k === dkey() ? 'Сегодня' : fmtDW(k)) + '</b>' + (k !== dkey() ? '<div><button class="chip" data-a="date-today">К сегодняшнему дню</button></div>' : '<div class="small muted">' + fmtDW(k) + '</div>') + '</div><button class="iconbtn" data-a="date-next" aria-label="Вперёд">' + ic('chevr') + '</button></div>';
   h += '<div class="card"><div class="row sb"><div><div class="small muted">Съедено</div><div class="b num" style="font-size:26px">' + fmtN(st.kcal) + '</div></div><div class="center"><div class="small muted">Норма</div><div class="b num" style="font-size:26px">' + fmtN(target) + '</div></div><div style="text-align:right"><div class="small muted">' + (left >= 0 ? 'Осталось' : 'Сверх') + '</div><div class="b num" style="font-size:26px;color:' + (left >= 0 ? 'var(--pri)' : 'var(--gold)') + '">' + fmtN(Math.abs(left)) + '</div></div></div>' +
@@ -122,7 +125,7 @@ act('entry-save', el => {
   if (e.g) { const ng = nval('eg'); if (ng > 0) { const r = ng / e.g; ['k', 'p', 'f', 'c'].forEach(x => { e[x] = e[x] * r; }); e.g = ng; } }
   e.slot = val('es'); Store.save(); Sheets.close(); afterChange();
 });
-act('entry-del', el => { const D = Store.data(), k = S.date; D.food[k] = (D.food[k] || []).filter(x => x.id !== el.dataset.id); Store.save(); Sheets.close(); afterChange(); });
+act('entry-del', el => { Sheets.close(); withUndo('Запись удалена', () => { const D = Store.data(), k = S.date; D.food[k] = (D.food[k] || []).filter(x => x.id !== el.dataset.id); }); });
 act('quick-add', () => {
   Sheets.open('<label class="f">Название (необязательно)</label><input id="qn" type="text" placeholder="Обед в кафе">' +
     '<label class="f">Калории, ккал</label><input id="qk" type="number" inputmode="numeric">' +
@@ -147,13 +150,13 @@ function addEntry(slot, f, g, raw, date) {
 }
 
 /* ---------- Выбор продукта ---------- */
-const allFoods = D => D.customFoods.concat(D.recipes, FOODS);
+const allFoods = D => D.customFoods.concat(D.recipes, Store.db.scanned || [], FOODS);
 function foodById(id) { const D = Store.data(); return allFoods(D).find(f => f.id === id); }
 function foodByName(n) { const D = Store.data(); return allFoods(D).find(f => f.n === n); }
 function openPicker(o) {
   const body = Sheets.open('<input id="fq" type="search" placeholder="Поиск: гречка, борщ, яблоко…" autocomplete="off" enterkeyhint="search">' +
     '<div class="seg" id="ftabs"></div><div id="fres"></div><div class="tiny muted mt">«сухая/сырая» — вес до приготовления, «варёная/запечённая» — готовое блюдо.</div>' +
-    '<div class="row mt wrap"><button class="btn alt sm" data-a="custom-food">+ Свой продукт</button><button class="btn alt sm" data-a="recipe-new">+ Свой рецепт</button></div>', { title: o.title || 'Продукты' });
+    '<div class="row mt wrap"><button class="btn alt sm" data-a="barcode-open">Штрихкод</button><button class="btn alt sm" data-a="custom-food">+ Свой продукт</button><button class="btn alt sm" data-a="recipe-new">+ Свой рецепт</button></div>', { title: o.title || 'Продукты' });
   const ctx = { o: o, tab: 'all', body: body };
   Sheets.stack[Sheets.stack.length - 1].ctx = ctx;
   ctx.fill = function () {
@@ -197,7 +200,7 @@ act('pick-food', el => {
 });
 act('amt-set', el => { $('#fg').value = el.dataset.g; $('#fg').dispatchEvent(new Event('input')); });
 act('amt-back', () => {
-  const c = curPicker(); c.body.innerHTML = '<input id="fq" type="search" placeholder="Поиск: гречка, борщ, яблоко…" autocomplete="off"><div class="seg" id="ftabs"></div><div id="fres"></div><div class="row mt wrap"><button class="btn alt sm" data-a="custom-food">+ Свой продукт</button><button class="btn alt sm" data-a="recipe-new">+ Свой рецепт</button></div>';
+  const c = curPicker(); c.body.innerHTML = '<input id="fq" type="search" placeholder="Поиск: гречка, борщ, яблоко…" autocomplete="off"><div class="seg" id="ftabs"></div><div id="fres"></div><div class="row mt wrap"><button class="btn alt sm" data-a="barcode-open">Штрихкод</button><button class="btn alt sm" data-a="custom-food">+ Свой продукт</button><button class="btn alt sm" data-a="recipe-new">+ Свой рецепт</button></div>';
   c.fill(); $('#fq').addEventListener('input', c.fill);
 });
 act('amt-ok', () => {
@@ -211,9 +214,10 @@ act('food-add', el => { const slot = el.dataset.slot; openPicker({ title: 'До�
 
 /* Свой продукт */
 act('custom-food', () => {
-  Sheets.open('<label class="f">Название</label><input id="cn" type="text" placeholder="Например: Сырок «Тёма»">' +
+  window.__cf = window.__cf_once || null; window.__cf_once = null;
+  Sheets.open('<label class="f">Название</label><input id="cn" type="text" value="' + esc((window.__cf || {}).n || '') + '" placeholder="Например: Сырок «Тёма»">' +
     '<div class="small muted mt">Значения на 100 г, как на упаковке</div>' +
-    '<div class="two"><div><label class="f">Калории</label><input id="ck" type="number" inputmode="decimal"></div><div><label class="f">Белки, г</label><input id="cp" type="number" inputmode="decimal"></div><div><label class="f">Жиры, г</label><input id="cf" type="number" inputmode="decimal"></div><div><label class="f">Углеводы, г</label><input id="cc" type="number" inputmode="decimal"></div></div>' +
+    '<div class="two"><div><label class="f">Калории</label><input id="ck" type="number" inputmode="decimal"></div><div><label class="f">Белки, г</label><input id="cp" type="number" inputmode="decimal" value="' + ((window.__cf || {}).p || '') + '"></div><div><label class="f">Жиры, г</label><input id="cf" type="number" inputmode="decimal" value="' + ((window.__cf || {}).f || '') + '"></div><div><label class="f">Углеводы, г</label><input id="cc" type="number" inputmode="decimal" value="' + ((window.__cf || {}).c || '') + '"></div></div>' +
     '<label class="f">Вес одной порции/штуки, г (необязательно)</label><input id="cu" type="number" inputmode="decimal"><button class="btn block mt" data-a="custom-food-ok">Сохранить</button>', { title: 'Свой продукт' });
 });
 act('custom-food-ok', () => {
@@ -222,7 +226,9 @@ act('custom-food-ok', () => {
   const D = Store.data(), u = nval('cu');
   const f = { id: 'c' + uid(), n: n, k: k, p: nval('cp') || 0, f: nval('cf') || 0, c: nval('cc') || 0, cat: 'Мои продукты', q: normQ(n) };
   if (u > 0) { f.ug = u; f.ul = 'шт'; }
-  D.customFoods.push(f); Store.save(); Sheets.close();
+  if (window.__cf && window.__cf.barcode) { f.barcode = window.__cf.barcode; f.id = 's' + f.barcode; f.cat = 'Из штрихкода'; Store.db.scanned.push(f); }
+  else D.customFoods.push(f);
+  window.__cf = null; Store.save(); Sheets.close();
   const c = curPicker(); if (c && c.fill) c.fill(); toast('Продукт сохранён');
 });
 
@@ -254,119 +260,10 @@ act('rb-save', () => {
   const c = curPicker(); if (c && c.fill) c.fill();
 });
 
-/* ---------- План питания ---------- */
-const MEALSLOT = { b: 'b', s1: 's', l: 'l', s2: 's', d: 'd' };
-function weekPlanFor(P, D, wk) {
-  const db = Store.db;
-  return MealPlan.genWeek(calcPlanFor(P, D).target, wk, { seed: (db.seeds[wk] || 0), maxCost: db.prefs.budget, reserveDow: db.prefs.reserveDow });
-}
-function ingLine(n, g) {
-  const f = findFood(n); let extra = '';
-  if (f && f.ul === 'шт' && f.ug) { const c = g / f.ug; extra = ' (≈ ' + (Math.round(c * 2) / 2) + ' шт)'; }
-  return '<li><span>' + esc(n.replace(/ \((сухая|сухой|сухие|сырая|сырой|сырое)\)$/, '')) + '</span><span>' + g + ' г' + extra + '</span></li>';
-}
-VIEWS.plan = function (P, D, g) {
-  const sub = S.sub.plan, wk = weekStart(S.planDate), plan = weekPlanFor(P, D, wk), db = Store.db;
-  let h = '<div class="seg">' + [['day', 'День'], ['week', 'Неделя'], ['shop', 'Покупки'], ['basket', 'Корзина']].map(t => '<button class="' + (sub === t[0] ? 'on' : '') + '" data-a="plan-sub" data-s="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
-  if (sub === 'day' || sub === 'week' || sub === 'shop') {
-    h += '<div class="datebar"><button class="iconbtn" data-a="plan-week" data-d="-7" aria-label="Предыдущая неделя">' + ic('chevl') + '</button><div class="center"><b>' + fmtD(wk) + ' – ' + fmtD(addDays(wk, 6)) + '</b>' + (wk === weekStart(dkey()) ? '<div class="small muted">эта неделя</div>' : '') + '</div><button class="iconbtn" data-a="plan-week" data-d="7" aria-label="Следующая неделя">' + ic('chevr') + '</button></div>';
-  }
-  if (sub === 'day') {
-    h += '<div class="days">' + plan.days.map(d => '<button class="' + (d.date === S.planDate ? 'on ' : '') + (d.date === dkey() ? 'today' : '') + '" data-a="plan-day" data-d="' + d.date + '">' + WD[parseD(d.date).getDay()] + '<b>' + parseD(d.date).getDate() + '</b></button>').join('') + '</div>';
-    const day = plan.days.find(d => d.date === S.planDate) || plan.days[0];
-    h += '<div class="card"><div class="row sb"><div><div class="small muted">План на день</div><div class="b num" style="font-size:24px">' + fmtN(day.tot.k) + ' ккал</div></div><div style="text-align:right" class="small muted num">Б ' + day.tot.p + ' · Ж ' + day.tot.f + ' · У ' + day.tot.c + (day.factor > 1.01 ? '<div><span class="pill gold">день с запасом</span></div>' : '') + '</div></div></div>';
-    day.meals.forEach((m, i) => {
-      const sl = MealPlan.SLOTS[i], dish = MealPlan.DISH[m.dishId];
-      h += '<div class="card dish"><div class="slotname">' + sl.icon + ' ' + sl.name + ' · ' + m.k + ' ккал</div><h4>' + esc(dish.n) + '</h4><ul>' + m.ing.map(x => ingLine(x[0], x[1])).join('') + '</ul>' +
-        '<div class="small muted">Б ' + m.p + ' · Ж ' + m.f + ' · У ' + m.c + '</div>' + (dish.tip ? '<div class="small mt">💡 ' + esc(dish.tip) + '</div>' : '') +
-        '<button class="btn alt sm mt" data-a="plan-eat" data-day="' + day.date + '" data-i="' + i + '">В дневник</button></div>';
-    });
-    h += '<button class="btn ghost block" data-a="plan-reroll">Другое меню на эту неделю</button>';
-  } else if (sub === 'week') {
-    h += settingsPlanPrefs();
-    h += plan.days.map(d => '<div class="card"><div class="row sb"><b>' + WDL[parseD(d.date).getDay()] + ', ' + fmtD(d.date) + '</b><span class="num b">' + d.tot.k + ' ккал</span></div>' + d.meals.map((m, i) => '<div class="small mt"><span class="muted">' + MealPlan.SLOTS[i].name + ':</span> ' + esc(MealPlan.DISH[m.dishId].n) + '</div>').join('') + '<button class="btn alt sm mt" data-a="plan-day-open" data-d="' + d.date + '">Подробно</button></div>').join('');
-    h += '<button class="btn ghost block" data-a="plan-reroll">Другое меню на эту неделю</button>';
-  } else if (sub === 'shop') {
-    const who = S.shopWho, scope = S.shopScope;
-    const dates = plan.days.map(d => d.date).filter(d => scope === 'week' || d >= dkey());
-    const plans = who === 'all' ? db.profiles.map(p => weekPlanFor(p, Store.data(p.id), wk)) : [plan];
-    const sh = MealPlan.shopping(plans, dates, db.prices);
-    db.checks = db.checks || {};
-    const ck = db.checks[wk + scope + who] || {};
-    h += '<div class="card"><div class="two"><div><label class="f">Период</label><select data-c="shopScope"><option value="week"' + (scope === 'week' ? ' selected' : '') + '>Вся неделя</option><option value="rest"' + (scope === 'rest' ? ' selected' : '') + '>С сегодняшнего дня</option></select></div><div><label class="f">Для кого</label><select data-c="shopWho"><option value="me"' + (who === 'me' ? ' selected' : '') + '>Только я</option><option value="all"' + (who === 'all' ? ' selected' : '') + '>Все профили (' + db.profiles.length + ')</option></select></div></div>' +
-      '<div class="row sb mt"><span class="muted">Примерная стоимость</span><b class="num" style="font-size:22px">' + fmtN(sh.total) + ' ₽</b></div><div class="tiny muted">Цены ориентировочные. Нажмите на цену, чтобы поставить свою (₽ за кг).</div></div>';
-    if (!sh.items.length) h += '<div class="empty">Нет блюд на выбранный период</div>';
-    let cat = '';
-    sh.items.forEach(it => {
-      if (it.cat !== cat) { cat = it.cat; h += '<div class="b mt2 mb small muted">' + esc(cat) + '</div>'; }
-      const on = ck[it.n];
-      const amount = it.buyG >= 1000 ? (it.buyG / 1000).toFixed(it.buyG % 1000 ? 2 : 0).replace(/\.?0+$/, '') + ' кг' : it.buyG + ' г';
-      h += '<div class="chk ' + (on ? 'done' : '') + '"><div class="tick ' + (on ? 'on' : '') + '" data-a="shop-check" data-n="' + esc(it.n) + '" role="checkbox" aria-checked="' + !!on + '">' + ic('check') + '</div><div class="nm grow" data-a="shop-check" data-n="' + esc(it.n) + '"><div>' + esc(it.n.replace(/ \((сухая|сухой|сухие|сырая|сырой|сырое)\)$/, '')) + '</div><div class="small muted">' + amount + (it.pieces ? ' (≈ ' + it.pieces + ' шт)' : '') + '</div></div><button class="chip" data-a="price-edit" data-n="' + esc(it.n) + '">' + it.cost + ' ₽</button></div>';
-    });
-  } else {
-    h += '<div class="card"><h3>🛒 Бюджетная корзина для похудения</h3><div class="small muted">Цены приблизительные, ₽ за кг (если не указано иное). В вашем регионе могут отличаться: поправьте в разделе «Покупки».</div></div>';
-    BASKET.forEach(b => { h += '<div class="card"><h3>' + esc(b.grp) + '</h3><div class="small mb">' + esc(b.tip) + '</div><table class="t">' + b.items.map(i => '<tr><td>' + esc(i[0]) + '</td><td style="text-align:right" class="num">~' + i[1] + ' ₽</td></tr>').join('') + '</table></div>'; });
-    h += '<div class="card"><h3>Как не переплачивать</h3><ul style="padding-left:18px;margin:0">' + BASKET_RULES.map(r => '<li class="mb">' + esc(r) + '</li>').join('') + '</ul></div>';
-  }
-  return h;
-};
-function settingsPlanPrefs() {
-  const db = Store.db;
-  return '<div class="card"><div class="two"><div><label class="f">День с запасом (+15%)</label><select data-c="reserve"><option value="-1">Нет</option>' + ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((d, i) => '<option value="' + i + '"' + (db.prefs.reserveDow === i ? ' selected' : '') + '>' + d + '</option>').join('') + '</select></div>' +
-    '<div><label class="f">Бюджет блюд</label><select data-c="budget"><option value="1"' + (db.prefs.budget === 1 ? ' selected' : '') + '>Самые дешёвые</option><option value="2"' + (db.prefs.budget === 2 ? ' selected' : '') + '>Недорогие</option><option value="3"' + (db.prefs.budget === 3 ? ' selected' : '') + '>Любые</option></select></div></div><div class="tiny muted mt">День с запасом помогает не срываться в выходные: в остальные дни норма чуть ниже, а среднее за неделю остаётся тем же.</div></div>';
-}
-act('plan-sub', el => { S.sub.plan = el.dataset.s; rerender(); });
-act('plan-day', el => { S.planDate = el.dataset.d; rerender(); });
-act('plan-day-open', el => { S.planDate = el.dataset.d; S.sub.plan = 'day'; rerender(); });
-act('plan-week', el => { S.planDate = addDays(weekStart(S.planDate), +el.dataset.d); rerender(); });
-act('plan-reroll', () => { const wk = weekStart(S.planDate); Store.db.seeds[wk] = (Store.db.seeds[wk] || 0) + 1; Store.save(); rerender(); });
-act('plan-eat', el => {
-  const P = Store.prof(), D = Store.data(), wk = weekStart(el.dataset.day), plan = weekPlanFor(P, D, wk);
-  const day = plan.days.find(d => d.date === el.dataset.day), i = +el.dataset.i, m = day.meals[i], dish = MealPlan.DISH[m.dishId];
-  addEntry(MEALSLOT[m.slot], { n: dish.n, cat: 'План' }, m.g, { k: m.k, p: m.p, f: m.f, c: m.c }, day.date);
-  toast('Добавлено в дневник: ' + dish.n); rerender();
-});
-act('shop-check', el => {
-  const db = Store.db, wk = weekStart(S.planDate), key = wk + S.shopScope + S.shopWho;
-  db.checks = db.checks || {}; db.checks[key] = db.checks[key] || {};
-  db.checks[key][el.dataset.n] = !db.checks[key][el.dataset.n]; Store.save(); rerender();
-});
-act('price-edit', el => {
-  const n = el.dataset.n, cur = MealPlan.priceOf(n, Store.db.prices);
-  Sheets.open('<div class="b">' + esc(n) + '</div><label class="f">Цена, ₽ за 1 кг</label><input id="pr" type="number" inputmode="numeric" value="' + cur + '"><div class="row mt"><button class="btn ghost" data-a="price-reset" data-n="' + esc(n) + '">Сбросить</button><button class="btn grow" data-a="price-ok" data-n="' + esc(n) + '">Сохранить</button></div>', { title: 'Своя цена' });
-});
-act('price-ok', el => { const v = nval('pr'); if (!(v >= 0)) return; Store.db.prices[el.dataset.n] = v; Store.save(); Sheets.close(); rerender(); });
-act('price-reset', el => { delete Store.db.prices[el.dataset.n]; Store.save(); Sheets.close(); rerender(); });
-
 /* ---------- Движение ---------- */
 let RUN = null;
-VIEWS.move = function (P, D, g) {
-  const today = dkey(), wk = Ex.weekNo(P.createdAt, today), w = curWeight(P, D), bmi = Calc.bmi(w, P.height);
-  const prm = Ex.weekParams(wk, bmi), bm = Calc.bpMode(D.bp, Date.now());
-  const mv = D.moves[today] || [];
-  const microDone = mv.filter(m => m.kind === 'micro').length;
-  const walkMin = sum(mv.filter(m => m.kind === 'walk'), m => m.min);
-  let h = alertsHtml(P, D, g);
-  h += '<div class="card"><h3>👣 Неделя ' + wk + ' программы</h3><div class="small muted">Нагрузка растёт постепенно, подстраивается под вес и давление. Прыжков, бега и упражнений на полу здесь нет.</div>' +
-    '<div class="stat"><div><b>' + prm.min + '</b><span>мин сессия</span></div><div><b>' + prm.walk + '</b><span>мин ходьбы</span></div><div><b>' + prm.microPerDay + '</b><span>мини-разминки</span></div></div></div>';
-  if (bm.mode === 'stop') {
-    h += '<div class="card"><b>Сегодня без нагрузки.</b><div class="muted small mt">Отдыхайте. Когда давление вернётся в норму, раздел снова откроет упражнения.</div></div>';
-  } else {
-    const minutes = bm.mode === 'ok' ? prm.min : Math.min(6, prm.min);
-    h += '<div class="card"><h3>Основная разминка</h3><div class="small muted">' + minutes + ' минут · ' + (bm.mode === 'ok' ? 'сидя, стоя и у стены' : 'только сидя') + '</div><button class="btn block mt" data-a="run-start" data-kind="main" data-min="' + minutes + '">Начать</button></div>';
-    h += '<div class="card"><h3>Мини-разминка<span class="sp"></span><span class="small muted num">' + microDone + ' / ' + prm.microPerDay + '</span></h3><div class="small muted">2–3 минуты прямо за столом. Включите напоминания, чтобы не забывать.</div><button class="btn alt block mt" data-a="run-start" data-kind="micro">Начать</button></div>';
-    if (bm.mode === 'ok' || bm.mode === 'light') {
-      const goal = bm.mode === 'light' ? Math.min(10, prm.walk) : prm.walk;
-      h += '<div class="card"><h3>Ходьба<span class="sp"></span><span class="small muted num">' + r0(walkMin) + ' / ' + goal + ' мин</span></h3><div class="bar ok"><i style="width:' + clamp(walkMin / goal * 100, 0, 100) + '%"></i></div><div class="small muted mt">Темп, при котором можно разговаривать. Если одышка, идите медленнее.</div><div class="water"><button class="btn alt" data-a="walk" data-m="5">+5 мин</button><button class="btn alt" data-a="walk" data-m="10">+10 мин</button><button class="btn alt" data-a="walk" data-m="20">+20 мин</button></div></div>';
-    }
-  }
-  if (mv.length) h += '<div class="card"><h3>Сегодня сделано</h3><div class="list">' + mv.map(m => '<div class="item"><div class="nm"><b>' + esc(m.name) + '</b><span class="small muted">' + m.t + ' · ' + r1(m.min) + ' мин · ≈ ' + m.kcal + ' ккал</span></div><button class="star" data-a="move-del" data-id="' + m.id + '" aria-label="Удалить">' + ic('trash', 'sm') + '</button></div>').join('') + '</div><div class="tiny muted mt">Сожжённые калории только для информации: к норме еды они не добавляются.</div></div>';
-  h += '<div class="card"><h3>Упражнения</h3><div class="list">' + Ex.LIST.map(e => '<div class="item" data-a="ex-info" data-id="' + e.id + '"><div class="nm"><b>' + esc(e.n) + '</b><span class="small muted">' + ({ sit: 'сидя', stand: 'стоя', wall: 'у стены' }[e.mode]) + ' · уровень ' + e.lvl + '</span></div>' + ic('chevr', 'sm') + '</div>').join('') + '</div></div>';
-  h += '<div class="card"><h3>⚠ Остановитесь, если</h3><ul style="padding-left:18px;margin:0">' + Ex.STOP.map(s => '<li class="mb">' + esc(s) + '</li>').join('') + '</ul><div class="small muted">При таких признаках прекратите нагрузку, сядьте, отдохните. Если не проходит, вызовите скорую (103/112).</div></div>';
-  return h;
-};
 act('ex-info', el => { const e = Ex.BY[el.dataset.id]; Sheets.open('<p>' + esc(e.d) + '</p>' + (e.caution === 'knee' ? '<div class="banner warn"><div>Если появилась боль в коленях, уменьшите амплитуду или пропустите упражнение.</div></div>' : '') + '<div class="small muted">Рекомендуемое время: ' + e.sec + ' секунд</div>', { title: e.n }); });
-act('move-del', el => { const D = Store.data(), k = dkey(); D.moves[k] = (D.moves[k] || []).filter(m => m.id !== el.dataset.id); Store.save(); afterChange(); });
+act('move-del', el => withUndo('Запись о движении удалена', () => { const D = Store.data(), k = dkey(); D.moves[k] = (D.moves[k] || []).filter(m => m.id !== el.dataset.id); }));
 function logMove(kind, name, min, kcal) {
   const D = Store.data(), k = dkey();
   (D.moves[k] = D.moves[k] || []).push({ id: uid(), kind: kind, name: name, min: min, kcal: kcal, t: nowT() });
@@ -413,17 +310,17 @@ function finishRun(completed) {
   if (!RUN || RUN.done) return; RUN.done = true; clearInterval(RUN.timer);
   const min = RUN.elapsed / 60, kind = RUN.kind, kc = Math.round(RUN.kcal);
   const full = completed; RUN.completed = completed;
-  if (RUN.elapsed >= 45) { logMove(kind === 'micro' ? 'micro' : 'session', kind === 'micro' ? 'Мини-разминка' : 'Разминка', r1(min), kc); }
-  if (completed) { Sheets.closeAll(); celebrate('💪', 'Разминка выполнена', r1(min) + ' мин · примерно ' + kc + ' ккал. Так держать!', 'Дальше'); }
+  if (RUN.elapsed >= 45) { logMove(kind === 'micro' ? 'micro' : 'session', RUN.title || (kind === 'micro' ? 'Мини-разминка' : 'Разминка'), r1(min), kc); }
+  if (completed) { Sheets.closeAll(); celebrate('💪', (RUN.title || 'Разминка') + ': выполнено', r1(min) + ' мин · примерно ' + kc + ' ккал. Так держать!', 'Дальше'); }
   RUN = null; afterChange();
 }
 
 /* ---------- Прогресс ---------- */
 VIEWS.prog = function (P, D, g) {
   const sub = S.sub.prog;
-  const tabs = [['weight', 'Вес'], ['body', 'Тело'], ['bp', 'Давление'], ['glu', 'Сахар'], ['rew', 'Награды'], ['pair', 'Пара']];
+  const tabs = [['weight', 'Вес'], ['body', 'Тело'], ['power', 'Сила'], ['bp', 'Давление'], ['glu', 'Сахар'], ['rew', 'Награды'], ['pair', 'Пара']];
   let h = '<div class="seg">' + tabs.map(t => '<button class="' + (sub === t[0] ? 'on' : '') + '" data-a="prog-sub" data-s="' + t[0] + '">' + t[1] + '</button>').join('') + '</div>';
-  h += ({ weight: progWeight, body: progBody, bp: progBp, glu: progGlu, rew: progRew, pair: progPair }[sub])(P, D, g);
+  h += ({ weight: progWeight, body: progBody, power: progPower, bp: progBp, glu: progGlu, rew: progRew, pair: progPair }[sub])(P, D, g);
   return h;
 };
 act('prog-sub', el => { S.sub.prog = el.dataset.s; rerender(); });
@@ -458,7 +355,7 @@ act('weight-ok', () => {
   const D = Store.data(); D.weight = D.weight.filter(e => e.d !== d); D.weight.push({ d: d, w: r1(w) }); D.weight.sort((a, b) => a.d < b.d ? -1 : 1);
   Store.save(); Sheets.close(); toast('Вес записан'); afterChange();
 });
-act('weight-del', el => { const D = Store.data(); D.weight = D.weight.filter(e => e.d !== el.dataset.d); if (!D.weight.length) D.weight.push({ d: Store.prof().createdAt, w: Store.prof().startWeight }); Store.save(); afterChange(); });
+act('weight-del', el => withUndo('Взвешивание удалено', () => { const D = Store.data(); D.weight = D.weight.filter(e => e.d !== el.dataset.d); if (!D.weight.length) D.weight.push({ d: Store.prof().createdAt, w: Store.prof().startWeight }); }));
 act('goal-edit', () => {
   const P = Store.prof();
   Sheets.open('<label class="f">Целевой вес, кг</label><input id="gw" type="number" inputmode="decimal" value="' + (P.goalWeight || '') + '"><div class="tiny muted mt">Хорошая стратегия: сначала −5%, потом −10%, потом −15% от стартового веса и только потом решать про следующую цель.</div><button class="btn block mt" data-a="goal-ok">Сохранить</button>', { title: 'Цель' });
@@ -484,7 +381,7 @@ act('meas-ok', () => {
   const D = Store.data(); D.meas = D.meas.filter(m => m.d !== d); D.meas.push({ d: d, waist: w > 0 ? w : null, hips: hp > 0 ? hp : null, chest: c > 0 ? c : null });
   Store.save(); Sheets.close(); toast('Замеры сохранены'); afterChange();
 });
-act('meas-del', el => { const D = Store.data(); D.meas = D.meas.filter(m => m.d !== el.dataset.d); Store.save(); afterChange(); });
+act('meas-del', el => withUndo('Замер удалён', () => { const D = Store.data(); D.meas = D.meas.filter(m => m.d !== el.dataset.d); }));
 
 const LVLCLS = ['ok', 'warn', 'bad', 'bad'];
 function progBp(P, D) {
@@ -517,7 +414,7 @@ act('bp-ok', () => {
   else toast('Давление ' + s + '/' + d + ': в норме');
   afterChange();
 });
-act('bp-del', el => { const D = Store.data(); D.bp = D.bp.filter(x => x.id !== el.dataset.id); Store.save(); afterChange(); });
+act('bp-del', el => withUndo('Замер удалён', () => { const D = Store.data(); D.bp = D.bp.filter(x => x.id !== el.dataset.id); }));
 
 function progGlu(P, D) {
   const l = D.glu.slice().sort((a, b) => a.ts - b.ts);
@@ -542,7 +439,7 @@ act('glu-ok', () => {
   else toast(lv === 0 ? 'Сахар в норме' : 'Сахар чуть выше идеального');
   afterChange();
 });
-act('glu-del', el => { const D = Store.data(); D.glu = D.glu.filter(x => x.id !== el.dataset.id); Store.save(); afterChange(); });
+act('glu-del', el => withUndo('Замер удалён', () => { const D = Store.data(); D.glu = D.glu.filter(x => x.id !== el.dataset.id); }));
 
 /* Награды */
 const REW = [['5', 'Этап −5% веса'], ['10', 'Этап −10% веса'], ['15', 'Этап −15% веса'], ['goal', 'Достижение цели'], ['streak7', 'Серия 7 дней'], ['streak30', 'Серия 30 дней']];
@@ -656,9 +553,9 @@ function openSettings(focus) {
     '<div class="row sb mt2"><span>Напомнить о резервной копии</span>' + sw('nKon', n.backup.on) + '</div><div class="two"><div>' + dowSel('nKd', n.backup.dow) + '</div><div><input id="nKt" type="time" value="' + n.backup.time + '"></div></div>' +
     '<button class="btn block mt2" data-a="notif-save">Сохранить и применить</button><div class="row mt"><button class="btn ghost grow" data-a="notif-test">Тест уведомления</button>' + (native ? '<button class="btn ghost grow" data-a="notif-exact">Точные будильники</button>' : '') + '</div>' +
     '<div class="small muted mt">Если уведомления приходят с задержкой или не приходят: в настройках телефона откройте «Приложения → Легче → Батарея» и выберите «Без ограничений», затем разрешите «Автозапуск» (на Xiaomi, Huawei, Samsung, Realme это отдельный пункт).</div></div>' +
-    '<div class="card"><h3>🍽 Питание</h3>' + settingsPlanPrefs() + '</div>' +
+    '<div class="card"><h3>🍽 Питание</h3>' + settingsPlanPrefs() + '</div>' + extraSettingsHtml() +
     '<div class="card"><h3>👥 Профили</h3>' + Store.db.profiles.map(p => '<div class="row sb mb"><span>' + esc(p.name) + (p.id === Store.db.activeId ? ' (активный)' : '') + '</span><button class="btn danger sm" data-a="profile-del" data-id="' + p.id + '">Удалить</button></div>').join('') + '<button class="btn alt block" data-a="profile-new">Добавить профиль</button></div>' +
-    '<div class="card"><h3>💾 Данные</h3><div class="small muted mb">Данные хранятся только на этом телефоне. Делайте копию раз в неделю и перед обновлением приложения.</div><button class="btn block" data-a="data-export">Сохранить копию (файл)</button><div class="two mt"><button class="btn ghost" data-a="data-copy">Копировать текстом</button><label class="btn ghost" style="cursor:pointer">Загрузить из файла<input id="impf" type="file" accept=".json,application/json" style="display:none"></label></div><button class="btn danger block mt" data-a="data-reset">Удалить все данные</button></div>' +
+    '<div class="card"><h3>💾 Данные</h3><div class="small muted mb">Данные хранятся только на этом телефоне. Делайте копию раз в неделю и перед обновлением приложения.</div><button class="btn block" data-a="data-export">Сохранить копию (файл)</button><div class="two mt"><button class="btn ghost" data-a="data-copy">Копировать текстом</button><label class="btn ghost" style="cursor:pointer">Загрузить из файла<input id="impf" type="file" accept=".json,application/json" style="display:none"></label></div><button class="btn alt block mt" data-a="data-paste">Восстановить из текста (буфер обмена)</button><button class="btn danger block mt" data-a="data-reset">Удалить все данные</button></div>' +
     '<div class="card flat small muted"><b>Важно.</b> «Легче» — помощник по учёту и мотивации, а не медицинское изделие. Расчёты ориентировочные. Тонометр и глюкометр дают данные для подсказок, но не заменяют консультацию врача. При боли в груди, сильной одышке, обмороке, давлении от 180/120 или сахаре ниже 3,9 с плохим самочувствием обращайтесь за помощью (103/112).<br><br>Версия 1.0 · Все данные локальные · Интернет не нужен.</div>';
   const body = Sheets.open(html, { title: 'Настройки', full: true });
   $('#impf', body).addEventListener('change', ev => {
@@ -708,10 +605,23 @@ act('data-export', async () => {
       await C.Filesystem.writeFile({ path: name, data: txt, directory: 'CACHE', encoding: 'utf8' });
       const u = await C.Filesystem.getUri({ path: name, directory: 'CACHE' });
       await C.Share.share({ title: 'Резервная копия «Легче»', url: u.uri, dialogTitle: 'Сохранить копию' });
+      Store.db.lastBackup = dkey(); Store.save();
     } else {
-      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([txt], { type: 'application/json' })); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([txt], { type: 'application/json' })); a.download = name; document.body.appendChild(a); a.click(); a.remove(); Store.db.lastBackup = dkey(); Store.save();
     }
   } catch (e) { if (!/cancel/i.test(String(e && e.message))) toast('Не удалось сохранить файл. Используйте «Копировать текстом»'); }
 });
-act('data-copy', () => { const t = Store.exportJson(); try { navigator.clipboard.writeText(t).then(() => toast('Скопировано. Вставьте в заметки или мессенджер'), () => toast('Не удалось скопировать')); } catch (e) { toast('Не удалось скопировать'); } });
+act('data-copy', () => { const t = Store.exportJson(); try { navigator.clipboard.writeText(t).then(() => { Store.db.lastBackup = dkey(); Store.save(); toast('Скопировано. Вставьте в заметки или мессенджер'); }, () => toast('Не удалось скопировать')); } catch (e) { toast('Не удалось скопировать'); } });
 act('data-reset', () => { if (confirm('Удалить ВСЕ данные приложения? Сделайте копию заранее.') && confirm('Точно удалить? Отменить нельзя.')) { Store.reset(); Sheets.closeAll(); applyNotif(true); rerender(); } });
+
+act('data-paste', () => {
+  Sheets.open('<div class="small muted mb">Вставьте сюда текст копии (долгое нажатие → Вставить). Затем нажмите «Восстановить».</div><textarea id="pastetxt" rows="8" placeholder="{ &quot;app&quot;: &quot;legche&quot;, ... }"></textarea><button class="btn block mt" data-a="data-paste-ok">Восстановить</button>', { title: 'Восстановление из текста' });
+  try { if (navigator.clipboard && navigator.clipboard.readText) navigator.clipboard.readText().then(t => { const e = document.getElementById('pastetxt'); if (e && t && t.indexOf('"profiles"') >= 0 && !e.value) e.value = t; }, () => { }); } catch (e) { }
+});
+act('data-paste-ok', () => {
+  const t = val('pastetxt').trim();
+  if (!t) return toast('Сначала вставьте текст копии');
+  try { JSON.parse(t); } catch (e) { return toast('Это не похоже на копию: текст неполный или изменён'); }
+  if (!confirm('Заменить текущие данные данными из текста?')) return;
+  try { Store.importJson(t); Sheets.closeAll(); S.date = dkey(); toast('Данные восстановлены'); rerender(); applyNotif(true); } catch (e) { toast('Не удалось восстановить: ' + e.message); }
+});

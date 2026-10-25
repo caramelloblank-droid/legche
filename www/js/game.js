@@ -20,7 +20,9 @@ const Game = (function () {
     const floor = Calc.FLOOR[P.sex] || 1200;
     const food = fe.length >= 1 && kcal >= floor * 0.75;
     const waterOk = water >= goal * 0.8, move = mins >= 5;
-    return { k, kcal, p, f, c, n: fe.length, water, goal, waterOk, mins, move, food, complete: food && waterOk && move, moves: mv.length };
+    const per = typeof Periods !== 'undefined' ? Periods.at(D, k) : null;
+    const feast = !!per && per.type === 'feast', neutral = !!per && per.type !== 'feast';
+    return { k, kcal, p, f, c, n: fe.length, water, goal, waterOk, mins, move, food, complete: feast || (food && waterOk && move), moves: mv.length, feast, neutral };
   }
 
   function streakInfo(P, D, today, stat) {
@@ -29,6 +31,7 @@ const Game = (function () {
     let k = addDays(today, -1);
     while (k >= P.createdAt) {
       if (stat(k).complete) streak++;
+      else if (stat(k).neutral) { /* поездка, болезнь, пауза: день не засчитывается и не прерывает серию */ }
       else { const wk = weekStart(k); if (!used[wk]) used[wk] = 1; else break; }
       k = addDays(k, -1);
     }
@@ -44,6 +47,7 @@ const Game = (function () {
     { id: 'weigh2', t: 'Взвеситься 2 раза за неделю', goal: 2, f: (ds, D) => D.weight.filter(w => ds.some(s => s.k === w.d)).length },
     { id: 'protein4', t: 'Белок ≥ 90% нормы, 4 дня', goal: 4, f: (ds, D, P) => ds.filter(s => s.food && s.p >= 0.9 * Calc.plan(P, weightAt(P, D, s.k)).protein).length },
     { id: 'nosweet4', t: 'Без сладкого 4 дня', goal: 4, f: (ds, D) => ds.filter(s => s.food && !(D.food[s.k] || []).some(e => e.cat === 'Сладкое')).length },
+    { id: 'str3', t: '3 силовые тренировки за неделю', goal: 3, f: (ds, D) => (D.strength ? D.strength.sessions : []).filter(x => ds.some(s => s.k === x.d)).length },
     { id: 'move3x', t: 'Две разминки в день, 3 дня', goal: 3, f: ds => ds.filter(s => s.moves >= 2).length }
   ];
   function weekChallenges(P, D, wk, stat) {
@@ -77,6 +81,10 @@ const Game = (function () {
     { id: 'waist10', i: '📏', n: 'Талия −10 см', d: 'Талия уменьшилась на 10 см', c: x => x.waistDrop >= 10 },
     { id: 'bp_green', i: '❤', n: 'Давление в норме 2 недели', d: 'Не менее 5 замеров за 14 дней, все в зелёной зоне', c: x => x.bpGreen },
     { id: 'glu_green', i: '🩸', n: 'Сахар в норме 2 недели', d: 'Не менее 5 замеров за 14 дней, все в зелёной зоне', c: x => x.gluGreen },
+    { id: 'str_test', i: '🧪', n: 'Первая проверка силы', d: 'Пройти стартовую проверку силы', c: x => x.tests >= 1 },
+    { id: 'str10', i: '🏋', n: '10 силовых', d: 'Провести 10 силовых тренировок', c: x => x.strSessions >= 10 },
+    { id: 'str30', i: '🏋', n: '30 силовых', d: 'Провести 30 силовых тренировок', c: x => x.strSessions >= 30 },
+    { id: 'sts5', i: '🪑', n: 'Вставание со стула +5', d: 'Улучшить результат теста «вставание со стула» на 5 раз', c: x => x.stsGain >= 5 },
     { id: 'ch1', i: '🎲', n: 'Первый челлендж', d: 'Выполнить недельный челлендж', c: x => x.chDone >= 1 },
     { id: 'ch10', i: '🎖', n: '10 челленджей', d: 'Выполнить 10 недельных челленджей', c: x => x.chDone >= 10 }
   ];
@@ -114,7 +122,8 @@ const Game = (function () {
     const si = streakInfo(P, D, today, stat);
     if (si.streak > (D.best || 0)) D.best = si.streak;
     // вес
-    const ma = Calc.movAvg(D.weight);
+    const wUse = typeof Periods !== 'undefined' ? D.weight.filter(w => !Periods.weightExcluded(D, w.d)) : D.weight;
+    const ma = Calc.movAvg(wUse.length ? wUse : D.weight);
     const curMA = ma.length ? ma[ma.length - 1].w : P.startWeight;
     const loss = Math.max(0, r1(P.startWeight - curMA));
     const lossPct = P.startWeight ? Math.max(0, r1(loss / P.startWeight * 100)) : 0;
@@ -124,7 +133,10 @@ const Game = (function () {
     const bp14 = D.bp.filter(b => b.d >= from14), gl14 = D.glu.filter(g => g.d >= from14);
     const bpGreen = bp14.length >= 5 && bp14.every(b => Calc.bpLevel(b.sys, b.dia) === 0);
     const gluGreen = gl14.length >= 5 && gl14.every(g => Calc.gluLevel(g.v, g.kind) === 0);
-    const x = { entries, best: D.best || 0, waterDays, moveDays, perfectWeek, loss, lossPct, waistDrop, bpGreen, gluGreen, chDone };
+    const st_ = D.strength || { sessions: [], tests: [] };
+    const tsts = st_.tests.slice().sort((a, b) => a.d < b.d ? -1 : 1);
+    const stsGain = tsts.length > 1 ? (tsts[tsts.length - 1].sts || 0) - (tsts[0].sts || 0) : 0;
+    const x = { tests: st_.tests.length, strSessions: st_.sessions.length, stsGain, entries, best: D.best || 0, waterDays, moveDays, perfectWeek, loss, lossPct, waistDrop, bpGreen, gluGreen, chDone };
     const unlocked = ACH.filter(a => a.c(x));
     const newly = [];
     unlocked.forEach(a => { if (!D.ach[a.id]) { D.ach[a.id] = today; newly.push(a); } });

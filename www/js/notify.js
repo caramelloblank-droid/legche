@@ -1,7 +1,7 @@
 /* Локальные уведомления Android (Capacitor LocalNotifications). Работают без интернета и без сервера, в том числе при закрытом приложении. */
 const Notify = (function () {
   const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-  const LN = () => window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+  const LN = () => plug('LocalNotifications');
   const ICON = 'ic_stat_legche', COLOR = '#138A8A';
   const MOVE = [
     ['Пора размяться', 'Встаньте, потянитесь, пройдитесь минуту. Спина скажет спасибо.'],
@@ -58,7 +58,8 @@ const Notify = (function () {
   async function cancelAll() {
     const ln = LN(); if (!ln) return;
     const p = await ln.getPending();
-    if (p.notifications && p.notifications.length) await ln.cancel({ notifications: p.notifications.map(n => ({ id: n.id })) });
+    const mine = (p.notifications || []).filter(n => n.id < 40000);
+    if (mine.length) await ln.cancel({ notifications: mine.map(n => ({ id: n.id })) });
   }
   /** Применить настройки: отменить старые, поставить новые. */
   async function apply(cfg) {
@@ -86,9 +87,33 @@ const Notify = (function () {
       return { ok: true };
     } catch (e) { return { ok: false, reason: 'error', msg: String(e && e.message || e) }; }
   }
+  /** Разовое уведомление (например, «измерьте давление» наутро после застолья) */
+  async function oneShot(id, title, body, at) {
+    if (!isNative()) return false;
+    try { if (!(await ensurePerm())) return false; await channels(); await LN().schedule({ notifications: [{ id: id, title: title, body: body, channelId: 'health', smallIcon: ICON, iconColor: COLOR, extra: { go: 'bp' }, schedule: { at: at, allowWhileIdle: true } }] }); return true; } catch (e) { return false; }
+  }
+  async function cancelIds(ids) { const ln = LN(); if (!ln || !ids.length) return; try { await ln.cancel({ notifications: ids.map(id => ({ id: id })) }); } catch (e) { } }
+  /** Диагностика напоминаний */
+  async function diag() {
+    const out = { native: isNative(), perm: null, exact: null, pending: null, next: null };
+    if (!out.native) return out;
+    const ln = LN(); if (!ln) { out.perm = 'нет плагина'; return out; }
+    try { out.perm = (await ln.checkPermissions()).display; } catch (e) { out.perm = 'ошибка'; }
+    out.exact = await exactStatus();
+    try {
+      const p = await ln.getPending(); out.pending = (p.notifications || []).length;
+      const now = new Date(); let best = null;
+      (p.notifications || []).forEach(n => {
+        const on = n.schedule && n.schedule.on; if (!on) { if (n.schedule && n.schedule.at) { const t = new Date(n.schedule.at); if (t > now && (!best || t < best.t)) best = { t: t, title: n.title }; } return; }
+        for (let d = 0; d < 8; d++) { const t = new Date(now.getFullYear(), now.getMonth(), now.getDate() + d, on.hour || 0, on.minute || 0); if (t > now && (on.weekday == null || t.getDay() + 1 === on.weekday)) { if (!best || t < best.t) best = { t: t, title: n.title }; break; } }
+      });
+      out.next = best;
+    } catch (e) { out.pending = 'ошибка'; }
+    return out;
+  }
   async function exactStatus() { const ln = LN(); if (!ln || !ln.checkExactNotificationSetting) return null; try { return (await ln.checkExactNotificationSetting()).exact_alarm; } catch (e) { return null; } }
   async function openExact() { const ln = LN(); if (ln && ln.changeExactNotificationSetting) { try { await ln.changeExactNotificationSetting(); } catch (e) { } } }
   function onTap(cb) { const ln = LN(); if (ln && ln.addListener) ln.addListener('localNotificationActionPerformed', ev => { const g = ev && ev.notification && ev.notification.extra && ev.notification.extra.go; if (g) cb(g); }); }
-  return { isNative, build, apply, test, exactStatus, openExact, onTap, slots, mins };
+  return { isNative, build, apply, test, exactStatus, openExact, onTap, slots, mins, oneShot, cancelIds, diag };
 })();
 if (typeof module !== 'undefined') module.exports = Notify;

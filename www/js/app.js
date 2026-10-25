@@ -46,12 +46,18 @@ function render(keepTop) {
 act('tab', el => go(el.dataset.t));
 act('sheet-close', () => Sheets.close());
 act('celebrate-close', () => { const c = $('.celebrate'); if (c) c.remove(); setTimeout(() => announce(null), 60); });
-const CHG = {
+Object.assign(CHG, {
   shopScope: v => { S.shopScope = v; },
   shopWho: v => { S.shopWho = v; },
   reserve: v => { Store.db.prefs.reserveDow = +v; Store.save(); },
-  budget: v => { Store.db.prefs.budget = +v; Store.save(); }
-};
+  budget: v => { Store.db.prefs.budget = +v; Store.save(); },
+  weekBudget: v => { Store.db.prefs.weekBudget = Math.max(0, +v || 0); Store.save(); },
+  multiFirst: v => { Store.db.prefs.multiFirst = !!v; Store.save(); },
+  online: v => { Store.db.prefs.online = !!v; Store.save(); return 'noredraw'; },
+  font: v => { Store.db.prefs.font = +v; Store.save(); applyFont(); return 'noredraw'; },
+  recq: v => { RF.q = v; }
+});
+function applyFont() { document.body.style.zoom = String((Store.db.prefs.font || 100) / 100); }
 
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-a]'); if (!el) return;
@@ -59,7 +65,7 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('change', e => {
   const el = e.target.closest('[data-c]'); if (!el) return;
-  const f = CHG[el.dataset.c]; if (f) { f(el.value); if (Sheets.stack.length) { const body = Sheets.body(); } rerender(); }
+  const f = CHG[el.dataset.c]; if (f) { const r = f(el.type === 'checkbox' ? el.checked : el.value); if (r !== 'noredraw') rerender(); }
 });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
@@ -84,11 +90,19 @@ function initNative() {
     else if (g === 'settings') openSettings();
   });
 }
-function boot() {
+async function boot() {
   Store.load();
-  initNative();
-  render();
+  try { await Content.init(); }
+  catch (e) { document.body.innerHTML = '<div style="padding:24px;font-family:sans-serif"><h2>Не удалось загрузить данные приложения</h2><p>' + esc(String(e && e.message || e)) + '</p><p>Переустановите приложение. Ваши данные не пострадают, если сделана резервная копия.</p></div>'; return; }
+  if (!Store.db.profiles.length && !Store.db.seenVersion) { Store.db.seenVersion = APP_VERSION; Store.save(); }
+  applyFont(); initNative(); render();
   if (Notify.isNative() && Store.db.notif.on) applyNotif(true);
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => { });
+  setTimeout(whatsNew, 600);
+  setTimeout(async () => {
+    const r = await Content.checkRemote(false);
+    if (r && r.updated && r.updated.length) { toast('Рецепты и продукты обновлены'); if (!Sheets.stack.length) render(); }
+    const u = await Updater.check(false); if (u && !Sheets.stack.length) render();
+  }, 2500);
 }
 window.addEventListener('DOMContentLoaded', boot);

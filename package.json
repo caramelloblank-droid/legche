@@ -1,14 +1,16 @@
 {
   "name": "legche",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Легче — трекер питания, воды, веса и движения для похудения (Android)",
   "scripts": {
-    "test": "node tests/calc.test.js && node tests/plan.test.js && node tests/game.test.js && node tests/notify.test.js"
+    "test": "python3 ci/build_content.py --check && node tests/calc.test.js && node tests/plan.test.js && node tests/logic2.test.js && node tests/game.test.js && node tests/notify.test.js"
   },
   "dependencies": {
+    "@capacitor-mlkit/barcode-scanning": "^6.0.0",
     "@capacitor/android": "^6.2.0",
     "@capacitor/app": "^6.0.0",
+    "@capacitor/browser": "^6.0.0",
     "@capacitor/core": "^6.2.0",
     "@capacitor/filesystem": "^6.0.0",
     "@capacitor/local-notifications": "^6.1.0",

@@ -12,8 +12,9 @@ const Store = (function () {
     diary: { on: true, time: '20:30' },
     backup: { on: true, dow: 0, time: '19:00' }
   });
-  const newData = () => ({ food: {}, water: {}, weight: [], meas: [], bp: [], glu: [], moves: {}, customFoods: [], recipes: [], fav: [], recent: [], rewards: {}, ach: {}, ms: {}, best: 0 });
-  const blank = () => ({ v: 1, activeId: null, profiles: [], data: {}, notif: defNotif(), prices: {}, seeds: {}, prefs: { budget: 2, reserveDow: -1, persons: 'me' }, partners: [] });
+  const newData = () => ({ food: {}, water: {}, weight: [], meas: [], bp: [], glu: [], moves: {}, customFoods: [], recipes: [], fav: [], recent: [], rewards: {}, ach: {}, ms: {}, best: 0, periods: [], strength: { start: null, sessions: [], tests: [], base: { goblet: null, pushLevel: 0 } } });
+  const defKit = () => (typeof MealPlan !== 'undefined' ? MealPlan.defKit() : { stove: true, oven: true, multi: true, chopper: true, immersion: true, toaster: true, micro: false });
+  const blank = () => ({ v: 2, activeId: null, profiles: [], data: {}, notif: defNotif(), prices: {}, seeds: {}, prefs: { budget: 2, reserveDow: -1, persons: 'me', font: 100, online: true, multiFirst: false, preFeast: false, comp: false, weekBudget: 0, banned: [], favRecipes: [], exclude: [], kit: defKit() }, partners: [], scanned: [], scanStats: { tries: 0, hits: 0 }, overrides: {}, have: {}, lastBackup: null, seenVersion: null, checks: {}, contentMeta: { checked: 0 }, updateMeta: { checked: 0, snooze: 0 } });
 
   function load() {
     try { db = JSON.parse(localStorage.getItem(KEY)); } catch (e) { db = null; }
@@ -22,6 +23,9 @@ const Store = (function () {
     Object.keys(b).forEach(k => { if (db[k] === undefined) db[k] = b[k]; });
     Object.keys(b.notif).forEach(k => { if (db.notif[k] === undefined) db.notif[k] = b.notif[k]; });
     Object.keys(b.prefs).forEach(k => { if (db.prefs[k] === undefined) db.prefs[k] = b.prefs[k]; });
+    Object.keys(b.prefs.kit).forEach(k => { if (db.prefs.kit[k] === undefined) db.prefs.kit[k] = b.prefs.kit[k]; });
+    db.profiles.forEach(p => { if (typeof Strength !== 'undefined') p.inventory = Strength.normInv(p.inventory); });
+    db.v = 2;
     db.profiles.forEach(p => { const d = data(p.id); const n = newData(); Object.keys(n).forEach(k => { if (d[k] === undefined) d[k] = n[k]; }); });
     if (!prof() && db.profiles.length) db.activeId = db.profiles[0].id;
     return db;
@@ -30,7 +34,7 @@ const Store = (function () {
   const prof = () => db.profiles.find(p => p.id === db.activeId) || null;
   function data(id) { id = id || db.activeId; if (!db.data[id]) db.data[id] = newData(); return db.data[id]; }
   function addProfile(p) {
-    p.id = uid(); p.createdAt = dkey(); p.startWeight = p.weight; p.calcWeight = p.weight;
+    p.id = uid(); p.createdAt = dkey(); p.startWeight = p.weight; p.calcWeight = p.weight; if (typeof Strength !== 'undefined') p.inventory = Strength.normInv(p.inventory);
     db.profiles.push(p); const d = data(p.id); d.weight.push({ d: dkey(), w: p.weight });
     db.activeId = p.id; save(); return p;
   }

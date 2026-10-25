@@ -51,7 +51,7 @@ const Ex = (function () {
 
   /** Собирает сессию на minutes минут: [{ex, sec, rest}] */
   function build(minutes, lvl, mode, secCap) {
-    let pool = LIST.filter(e => e.lvl <= lvl);
+    let pool = LIST.filter(e => e.lvl <= lvl && !e.cardio);
     if (mode === 'seated' || mode === 'light') pool = pool.filter(e => e.mode === 'sit' || e.lvl === 1);
     const warm = ['shoulders', 'neck', 'arms_up'].map(id => BY[id]);
     const cool = [BY.breath, BY.stretch_chest];
@@ -70,7 +70,7 @@ const Ex = (function () {
 
   /** Микро-разминка 1–3 минуты (для напоминаний «встань и разомнись») */
   function micro(seed, mode) {
-    const pool = LIST.filter(e => e.lvl <= 2 && e.id !== 'breath' && (mode === 'ok' || e.mode === 'sit'));
+    const pool = LIST.filter(e => !e.cardio && e.lvl <= 2 && e.id !== 'breath' && (mode === 'ok' || e.mode === 'sit'));
     const rnd = rng(seed + 11);
     const pick = shuffle(pool, rnd).slice(0, 3);
     return pick.map(e => ({ ex: e.id, sec: 40, rest: 5 }));
@@ -79,3 +79,22 @@ const Ex = (function () {
   return { LIST, BY, STOP, weekNo, weekParams, build, dur, micro, kcal };
 })();
 if (typeof module !== 'undefined') module.exports = Ex;
+
+/* ---- Кардио и офисные паузы (добавлено в 2.0) ---- */
+Ex.LIST.push(
+  { id: 'walk_slow', n: 'Ходьба в спокойном темпе', mode: 'stand', lvl: 1, sec: 60, met: 2.8, cardio: true, d: 'Идите легко, так чтобы свободно разговаривать.' },
+  { id: 'walk_fast', n: 'Быстрая ходьба', mode: 'stand', lvl: 2, sec: 60, met: 4.3, cardio: true, d: 'Темп, при котором можно говорить, но петь уже не получится.' },
+  { id: 'step_lo', n: 'Степпер: лёгкий темп', mode: 'stand', lvl: 1, sec: 60, met: 3.5, cardio: true, d: 'Держитесь за устойчивую опору. Педали ходят плавно, без рывков, нагрузка 3–4 из 10.' },
+  { id: 'step_hi', n: 'Степпер: средний темп', mode: 'stand', lvl: 2, sec: 60, met: 5.0, cardio: true, d: 'Держитесь за опору. Нагрузка 6–7 из 10: дыхание учащается, но говорить можете.' }
+);
+Ex.LIST.forEach(e => { if (!e.cardio) e.office = true; });
+Ex.LIST.forEach(e => { Ex.BY[e.id] = e; });
+/** Кардио-сессия: разминка, интервалы 1/1, заминка. useStepper=false — только ходьба */
+Ex.buildCardio = function (minutes, useStepper) {
+  const hi = useStepper ? 'step_hi' : 'walk_fast', lo = useStepper ? 'step_lo' : 'walk_slow';
+  const steps = [{ ex: lo, sec: 180, rest: 0 }];
+  let left = minutes * 60 - 180 - 120;
+  while (left >= 120) { steps.push({ ex: hi, sec: 60, rest: 0 }, { ex: lo, sec: 60, rest: 0 }); left -= 120; }
+  steps.push({ ex: lo, sec: 120, rest: 0 });
+  return steps;
+};

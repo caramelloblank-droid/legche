@@ -25,13 +25,20 @@ perms = [
     'android.permission.RECEIVE_BOOT_COMPLETED',
     'android.permission.VIBRATE',
     'android.permission.WAKE_LOCK',
+    'android.permission.INTERNET',
+    'android.permission.CAMERA',
 ]
 add = ''
 for p in perms:
     if p not in m:
         add += '    <uses-permission android:name="%s" />\n' % p
 must('</manifest>' in m, 'в манифесте нет </manifest>')
+if 'android.hardware.camera' not in m:
+    add += '    <uses-feature android:name="android.hardware.camera" android:required="false" />\n'
 m = m.replace('</manifest>', add + '</manifest>')
+# модуль сканера Google подгружается заранее (если сканер не подключён, запись безвредна)
+if 'com.google.mlkit.vision.DEPENDENCIES' not in m and '</application>' in m:
+    m = m.replace('</application>', '        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui"/>\n    </application>')
 # портретная ориентация и ресайз при появлении клавиатуры
 def patch_activity(match):
     tag = match.group(0)
@@ -42,6 +49,13 @@ def patch_activity(match):
     return tag
 m = re.sub(r'<activity\b[^>]*>', patch_activity, m, count=1)
 open(MANIFEST, 'w', encoding='utf8').write(m)
+
+# 1a. minSdk 23 нужен плагину сканера штрихкодов
+VARS = os.path.join(ANDROID, 'variables.gradle')
+if os.path.exists(VARS):
+    v = open(VARS, encoding='utf8').read()
+    v2 = re.sub(r'minSdkVersion\s*=\s*(\d+)', lambda mm: 'minSdkVersion = ' + str(max(23, int(mm.group(1)))), v)
+    open(VARS, 'w', encoding='utf8').write(v2)
 
 # 2. Иконка уведомлений
 os.makedirs(DRAW, exist_ok=True)

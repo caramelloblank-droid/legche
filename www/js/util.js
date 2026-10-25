@@ -22,3 +22,19 @@ function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h
 function rng(seed) { let s = (seed >>> 0) || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
 function shuffle(arr, rnd) { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
 function plural(n, a, b, c) { n = Math.abs(n) % 100; const m = n % 10; if (n > 10 && n < 20) return c; if (m > 1 && m < 5) return b; if (m === 1) return a; return c; }
+/* Доступ к нативным плагинам Capacitor: работает и когда плагин не подгружен как модуль */
+function plug(name) {
+  const C = typeof window !== 'undefined' ? window.Capacitor : null;
+  if (!C) return null;
+  if (C.Plugins && C.Plugins[name]) return C.Plugins[name];
+  if (C.registerPlugin) { try { return C.registerPlugin(name); } catch (e) { } }
+  return null;
+}
+const cmpVer = (a, b) => { const x = String(a).replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0), y = String(b).replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0); for (let i = 0; i < 3; i++) { if ((x[i] || 0) > (y[i] || 0)) return 1; if ((x[i] || 0) < (y[i] || 0)) return -1; } return 0; };
+
+/* fetch с ограничением по времени, чтобы приложение не «зависало» при плохой связи */
+function fetchT(url, opts, ms) {
+  const c = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const t = setTimeout(() => { if (c) c.abort(); }, ms || 8000);
+  return fetch(url, Object.assign({}, opts || {}, c ? { signal: c.signal } : {})).finally(() => clearTimeout(t));
+}

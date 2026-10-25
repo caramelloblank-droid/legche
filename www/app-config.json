@@ -1,0 +1,7 @@
+{
+  "version": "2.0.0",
+  "repo": "caramelloblank-droid/legche",
+  "branch": "main",
+  "contentBase": "https://raw.githubusercontent.com/caramelloblank-droid/legche/main/content/",
+  "offApi": "https://world.openfoodfacts.org/api/v2/product/"
+}

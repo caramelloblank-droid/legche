@@ -1,0 +1,7 @@
+node_modules/
+android/
+.gradle/
+build/
+*.log
+.DS_Store
+www/content/

@@ -1,7 +1,7 @@
 name: Сборка APK
 
 on:
-  # Автоматически: при создании тега вида v1.0.0 (в том числе через «Releases → Draft a new release»)
+  # Автоматически: при создании тега вида v2.0.0 (в том числе через «Releases → Draft a new release»)
   push:
     tags:
       - 'v*'
@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Версия приложения (например 1.0.0)'
+        description: 'Версия приложения (например 2.0.0)'
         required: true
-        default: '1.0.0'
+        default: '2.0.0'
       publish:
         description: 'Опубликовать релиз на GitHub (чтобы скачать APK с телефона)'
         type: boolean
@@ -27,7 +27,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx3g
     steps:
@@ -67,13 +67,17 @@ jobs:
       - name: Установить зависимости
         run: npm install --no-audit --no-fund
 
+      - name: Проверить и подготовить рецепты и продукты
+        run: |
+          python3 ci/build_content.py --auto --copy
+
       - name: Проверить расчёты (автотесты)
         run: npm test
 
       - name: Создать Android-проект
         run: npx cap add android
 
-      - name: Донастроить Android (уведомления, версия)
+      - name: Донастроить Android (уведомления, камера, версия)
         env:
           VERSION_NAME: ${{ steps.ver.outputs.name }}
           VERSION_CODE: ${{ github.run_number }}
@@ -92,10 +96,21 @@ jobs:
           cp ci/debug.keystore ~/.android/debug.keystore
 
       - name: Собрать APK
+        id: build1
+        continue-on-error: true
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Запасная сборка без сканера штрихкодов (если первая не удалась)
+        if: steps.build1.outcome == 'failure'
+        run: |
+          echo "::warning::Сборка со сканером штрихкодов не удалась. Собираем без камеры: штрихкод можно вводить вручную."
+          npm uninstall @capacitor-mlkit/barcode-scanning --no-audit --no-fund
+          npx cap sync android
+          cd android
+          ./gradlew clean assembleDebug --no-daemon --stacktrace
 
       - name: Подготовить файл
         run: |
@@ -124,4 +139,4 @@ jobs:
             2. Откройте его на телефоне и разрешите установку из этого источника.
             3. Если Google Play Protect предупредит о неизвестном приложении, нажмите «Всё равно установить».
 
-            Обновление ставится поверх старой версии, данные сохраняются. Перед обновлением всё равно сделайте копию: Настройки → Сохранить копию.
+            Обновление ставится поверх старой версии, данные сохраняются. Перед обновлением сделайте копию: Настройки → Данные → Сохранить копию.

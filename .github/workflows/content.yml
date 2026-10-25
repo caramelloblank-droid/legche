@@ -1,0 +1,32 @@
+name: Проверка рецептов и продуктов
+
+# Запускается, когда вы меняете файлы в папке content/ (например, добавили блюдо в recipes.json).
+# Проверяет ошибки и сам обновляет номер версии в manifest.json.
+# После этого приложения на телефонах скачают обновление (до 12 часов или по кнопке «Обновить рецепты и продукты»).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/**'
+
+permissions:
+  contents: write
+
+jobs:
+  content:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Проверить и обновить manifest.json
+        run: python3 ci/build_content.py --auto
+      - name: Сохранить manifest.json
+        run: |
+          if ! git diff --quiet content/manifest.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add content/manifest.json
+            git commit -m "content: обновлён manifest.json (версия и контрольная сумма)"
+            git push
+          else
+            echo "manifest.json уже актуален"
+          fi
